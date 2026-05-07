@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>🍊 2026 台灣遊戲橘子主管餐會</title>
+    <title>🍊 2026 台灣遊戲橘子主管餐會 (Cloud)</title>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -11,24 +13,14 @@
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
     <style>
         body { background-color: #020617; color: white; font-family: sans-serif; margin: 0; -webkit-tap-highlight-color: transparent; }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 10px; }
-        
         @keyframes master-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         @keyframes master-hop { 0%, 100% { margin-top: 0; } 50% { margin-top: -20px; } }
-
-        .orange-animation-container {
-            display: inline-block;
-            animation: master-spin 0.8s infinite linear, master-hop 0.6s infinite ease-in-out;
-            will-change: transform;
-        }
-
+        .orange-animation-container { display: inline-block; animation: master-spin 0.8s infinite linear, master-hop 0.6s infinite ease-in-out; }
         .size-small { transform: scale(1); }
         .size-mid { transform: scale(1.8); }
         .size-big { transform: scale(3.2); }
-
-        @keyframes popIn { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
         .name-card { animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+        @keyframes popIn { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }
     </style>
 </head>
 <body class="min-h-screen overflow-x-hidden">
@@ -36,16 +28,33 @@
 
     <script type="text/babel">
         const { useEffect, useState, useRef } = React;
-        const STORAGE_KEY = "raffle_gamania_2026_v8_1";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyBlQH6QvHvwGSXMX2qJDKdLmo8wBD6oycg",
+  authDomain: "gamania-raffle.firebaseapp.com",
+  projectId: "gamania-raffle",
+  storageBucket: "gamania-raffle.firebasestorage.app",
+  messagingSenderId: "744074818232",
+  appId: "1:744074818232:web:668c4f45b1c4a913dc3a4d",
+  measurementId: "G-BK4ZJJNDVB"
+};
+        const firebaseConfig = {
+            apiKey: "YOUR_FIREBASE_CONFIG_HERE",
+            authDomain: "...",
+            databaseURL: "...",
+            projectId: "...",
+            storageBucket: "...",
+            messagingSenderId: "...",
+            appId: "..."
+        };
+
+        // 初始化 Firebase
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.database();
 
         function RaffleApp() {
-            const [participants, setParticipants] = useState(["部門-姓名"]);
-            const [backupParticipants, setBackupParticipants] = useState([]); // 備份原始名單
-            const [prizeSettings, setPrizeSettings] = useState([
-                { id: 1, name: "頭獎🎉", count: 1 },
-                { id: 2, name: "二獎🎁", count: 5 },
-                { id: 3, name: "安慰獎", count: 10 }
-            ]);
+            const [participants, setParticipants] = useState([]);
+            const [prizeSettings, setPrizeSettings] = useState([{ id: 1, name: "頭獎🎉", count: 1 }]);
             const [selectedPrizeIndex, setSelectedPrizeIndex] = useState(0);
             const [results, setResults] = useState([]);
             const [history, setHistory] = useState([]);
@@ -55,94 +64,86 @@
             const [listInput, setListInput] = useState("");
             const sortableRef = useRef(null);
 
+            // --- 雲端監聽：這是核心 ---
             useEffect(() => {
-                const raw = localStorage.getItem(STORAGE_KEY);
-                if (raw) {
-                    try {
-                        const parsed = JSON.parse(raw);
-                        if(parsed.participants) setParticipants(parsed.participants);
-                        if(parsed.backupParticipants) setBackupParticipants(parsed.backupParticipants);
-                        if(parsed.participants) setListInput(parsed.participants.join('\n'));
-                        if(parsed.prizeSettings) setPrizeSettings(parsed.prizeSettings);
-                        if(parsed.history) setHistory(parsed.history);
-                    } catch(e) { console.error(e); }
-                } else {
-                    setListInput(participants.join('\n'));
-                    setBackupParticipants([...participants]);
-                }
+                // 1. 監聽全域狀態更新
+                db.ref("raffle_state").on("value", (snapshot) => {
+                    const data = snapshot.val();
+                    if (data) {
+                        setParticipants(data.participants || []);
+                        setPrizeSettings(data.prizeSettings || []);
+                        setHistory(data.history || []);
+                        setSelectedPrizeIndex(data.selectedPrizeIndex || 0);
+                        // 當有人觸發開獎時
+                        if (data.isSpinning && !isSpinning) {
+                            triggerDrawAnimation(data.winners, data.newPool, data.newHistory);
+                        }
+                    }
+                });
             }, []);
 
-            useEffect(() => {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify({ 
-                    participants, 
-                    backupParticipants, 
-                    prizeSettings, 
-                    history 
-                }));
-            }, [participants, backupParticipants, prizeSettings, history]);
-
-            useEffect(() => {
-                if (adminOpen && adminTab === 'prizes' && sortableRef.current) {
-                    const sortable = new Sortable(sortableRef.current, {
-                        animation: 150, handle: '.drag-handle',
-                        onEnd: (evt) => {
-                            const newPrizes = [...prizeSettings];
-                            const [movedItem] = newPrizes.splice(evt.oldIndex, 1);
-                            newPrizes.splice(evt.newIndex, 0, movedItem);
-                            setPrizeSettings(newPrizes);
-                            setResults([]);
-                        },
-                    });
-                    return () => sortable.destroy();
-                }
-            }, [adminOpen, adminTab, prizeSettings]);
-
-            const startDraw = () => {
-                if (isSpinning || participants.length === 0) return;
+            const triggerDrawAnimation = (winners, newPool, newHistory) => {
                 setIsSpinning(true);
                 setResults([]);
                 setTimeout(() => {
-                    let pool = [...participants];
-                    let winners = [];
-                    const drawNum = Math.min(prizeSettings[selectedPrizeIndex].count, pool.length);
-                    for (let i = 0; i < drawNum; i++) {
-                        const idx = Math.floor(Math.random() * pool.length);
-                        winners.push(pool[idx]);
-                        pool.splice(idx, 1);
-                    }
                     setResults(winners);
-                    setParticipants(pool);
-                    setListInput(pool.join('\n'));
-                    setHistory(h => [...winners.map(w => ({ time: new Date().toLocaleTimeString(), name: w, prize: prizeSettings[selectedPrizeIndex].name })), ...h]);
                     setIsSpinning(false);
+                    // 只有在動畫結束後，才同步更新本地顯示（其實資料庫已經更新了）
                 }, 1500);
             };
 
+            // --- 手機端點擊開獎 ---
+            const handleStartDrawRequest = () => {
+                if (isSpinning || participants.length === 0) return;
+                
+                const currentPrize = prizeSettings[selectedPrizeIndex];
+                let pool = [...participants];
+                let winners = [];
+                const drawNum = Math.min(currentPrize.count, pool.length);
+                
+                for (let i = 0; i < drawNum; i++) {
+                    const idx = Math.floor(Math.random() * pool.length);
+                    winners.push(pool[idx]);
+                    pool.splice(idx, 1);
+                }
+
+                const newHistory = [...winners.map(w => ({ time: new Date().toLocaleTimeString(), name: w, prize: currentPrize.name })), ...history];
+
+                // 推送到雲端，這會讓所有裝置同時啟動動畫
+                db.ref("raffle_state").update({
+                    isSpinning: true,
+                    winners: winners,
+                    newPool: pool,
+                    newHistory: newHistory,
+                    // 先把資料寫進去，但 isSpinning 會觸發各端的動畫
+                    participants: pool,
+                    history: newHistory
+                });
+
+                // 2秒後自動重置雲端旋轉狀態
+                setTimeout(() => {
+                    db.ref("raffle_state").update({ isSpinning: false });
+                }, 2000);
+            };
+
+            // --- 管理功能也同步雲端 ---
             const handleAdminSave = () => {
                 const updatedPool = listInput.split('\n').map(n => n.trim()).filter(n => n !== "");
-                setParticipants(updatedPool);
-                setBackupParticipants([...updatedPool]); // 儲存時更新備份
+                db.ref("raffle_state").update({
+                    participants: updatedPool,
+                    prizeSettings: prizeSettings,
+                    history: [],
+                    selectedPrizeIndex: 0
+                });
                 setAdminOpen(false);
             };
 
-            const resetSystem = () => {
-                if(confirm("確定要重置嗎？\n這將會：\n1. 清空目前所有中獎紀錄\n2. 讓所有人回到抽獎池中")) {
-                    setParticipants([...backupParticipants]); // 從備份還原
-                    setListInput(backupParticipants.join('\n'));
-                    setHistory([]);
-                    setResults([]);
-                    alert("系統已重置，名單已還原！");
-                }
-            };
-
             const downloadCSV = () => {
-                if (history.length === 0) return alert("暫無紀錄");
                 const header = "\ufeff時間,獎項,中獎人\n";
                 const content = history.map(h => `${h.time},${h.prize},${h.name}`).join("\n");
                 const blob = new Blob([header + content], { type: "text/csv;charset=utf-8;" });
-                const url = URL.createObjectURL(blob);
                 const link = document.createElement("a");
-                link.href = url;
+                link.href = URL.createObjectURL(blob);
                 link.download = `中獎名單.csv`;
                 link.click();
             };
@@ -158,15 +159,17 @@
                 <div className="flex flex-col p-3 lg:p-4 min-h-screen">
                     <button onClick={() => setAdminOpen(true)} className="absolute top-4 left-4 opacity-30 hover:opacity-100 text-2xl z-50">⚙️</button>
                     <header className="shrink-0 text-center py-2 mb-2">
-                        <h1 className="text-xl lg:text-2xl font-black text-orange-500 uppercase tracking-tighter">🍊 2026 台灣遊戲橘子主管餐會</h1>
+                        <h1 className="text-xl lg:text-2xl font-black text-orange-500 uppercase tracking-tighter italic">🍊 2026 台灣遊戲橘子主管餐會 (Sync)</h1>
                     </header>
 
                     <main className="flex-1 flex flex-col lg:grid lg:grid-cols-12 gap-4">
                         <div className="flex-[2] lg:col-span-9 bg-slate-900 rounded-[2.5rem] p-4 lg:p-6 flex flex-col border border-slate-800 shadow-2xl relative min-h-[450px] overflow-hidden">
                             <div className="shrink-0 flex justify-between items-center mb-4 border-b border-white/5 pb-3">
-                                <div className="text-sm lg:text-xl font-black text-white italic">{prizeSettings[selectedPrizeIndex]?.name}</div>
-                                <select className="bg-slate-800 text-white text-xs px-2 py-1 lg:px-4 lg:py-2 rounded-xl border border-slate-700" value={selectedPrizeIndex} onChange={(e) => { setSelectedPrizeIndex(parseInt(e.target.value)); setResults([]); }}>
-                                    {prizeSettings.map((p, i) => <option key={p.id} value={i}>{p.name} ({p.count}人)</option>)}
+                                <div className="text-sm lg:text-xl font-black text-white">{prizeSettings[selectedPrizeIndex]?.name}</div>
+                                <select className="bg-slate-800 text-white text-xs px-2 py-1 lg:px-4 lg:py-2 rounded-xl border border-slate-700 outline-none" 
+                                    value={selectedPrizeIndex} 
+                                    onChange={(e) => db.ref("raffle_state").update({selectedPrizeIndex: parseInt(e.target.value)})}>
+                                    {prizeSettings.map((p, i) => <option key={i} value={i}>{p.name} ({p.count}人)</option>)}
                                 </select>
                             </div>
 
@@ -198,18 +201,18 @@
                                         ))}
                                     </div>
                                 ) : (
-                                    <div className="text-4xl lg:text-8xl font-black text-slate-800 italic opacity-20 select-none uppercase">GAMANIA</div>
+                                    <div className="text-4xl lg:text-8xl font-black text-slate-800 italic opacity-20 select-none uppercase">CLOUD CONNECTED</div>
                                 )}
                             </div>
 
                             <div className="shrink-0 pt-4 flex flex-col items-center">
-                                <button onClick={startDraw} disabled={isSpinning || participants.length === 0} className="w-full max-w-sm bg-orange-600 text-white py-4 rounded-2xl font-black text-xl lg:text-3xl shadow-xl active:scale-95 transition-all">立刻開獎</button>
+                                <button onClick={handleStartDrawRequest} disabled={isSpinning || participants.length === 0} className="w-full max-w-sm bg-orange-600 text-white py-4 rounded-2xl font-black text-xl lg:text-3xl shadow-xl active:scale-95 transition-all">立刻開獎</button>
                                 <div className="mt-2 text-slate-500 text-[10px] lg:text-xs font-bold uppercase tracking-widest italic font-mono">POOL: {participants.length}</div>
                             </div>
                         </div>
 
                         <div className="flex-1 lg:col-span-3 bg-slate-900/50 rounded-[2rem] p-4 border border-slate-800 flex flex-col max-h-[250px] lg:max-h-none overflow-hidden shadow-2xl">
-                            <h3 className="shrink-0 font-black text-orange-500 mb-2 border-b border-white/10 pb-1 text-sm flex justify-between uppercase italic">Winner List</h3>
+                            <h3 className="shrink-0 font-black text-orange-500 mb-2 border-b border-white/10 pb-1 text-sm flex justify-between uppercase italic">History</h3>
                             <div className="flex-1 overflow-y-auto space-y-2 custom-scrollbar pr-1">
                                 {history.map((h, i) => (
                                     <div key={i} className="bg-slate-800 p-2 rounded-xl border border-white/5 text-[10px] lg:text-xs flex justify-between items-center">
@@ -222,41 +225,35 @@
                     </main>
 
                     {adminOpen && (
-                        <div className="fixed inset-0 bg-black/95 flex items-center justify-center z-[100] p-2 lg:p-6 text-sm">
-                            <div className="bg-slate-800 text-white p-4 lg:p-8 rounded-[2rem] w-full h-[95%] flex flex-col border border-slate-700 shadow-2xl overflow-hidden">
-                                <div className="flex justify-between items-center mb-4 text-orange-400 font-black text-lg lg:text-2xl uppercase italic">Control Panel</div>
+                        <div className="fixed inset-0 bg-black/95 flex items-center justify-center z-[100] p-4 text-sm">
+                            <div className="bg-slate-800 text-white p-4 lg:p-8 rounded-[2rem] w-full max-w-4xl h-[90%] flex flex-col border border-slate-700 shadow-2xl overflow-hidden">
+                                <div className="flex justify-between items-center mb-4 text-orange-400 font-black text-2xl uppercase">Settings</div>
                                 <div className="flex gap-2 mb-4 shrink-0 overflow-x-auto pb-2">
-                                    <button onClick={() => setAdminTab('list')} className={`px-6 py-2 rounded-xl font-bold transition-colors ${adminTab === 'list' ? 'bg-orange-600' : 'bg-slate-700 text-slate-400'}`}>👥 名單編輯</button>
-                                    <button onClick={() => setAdminTab('prizes')} className={`px-6 py-2 rounded-xl font-bold transition-colors ${adminTab === 'prizes' ? 'bg-orange-600' : 'bg-slate-700 text-slate-400'}`}>🏆 獎項設定</button>
+                                    <button onClick={() => setAdminTab('list')} className={`px-6 py-2 rounded-xl font-bold ${adminTab === 'list' ? 'bg-orange-600' : 'bg-slate-700'}`}>名單</button>
+                                    <button onClick={() => setAdminTab('prizes')} className={`px-6 py-2 rounded-xl font-bold ${adminTab === 'prizes' ? 'bg-orange-600' : 'bg-slate-700'}`}>獎項</button>
                                 </div>
                                 <div className="flex-1 bg-slate-900 rounded-2xl p-4 overflow-hidden relative mb-4">
                                     {adminTab === 'list' ? (
-                                        <textarea className="absolute inset-4 bg-transparent outline-none resize-none custom-scrollbar text-base lg:text-lg font-mono text-white" value={listInput} onChange={(e) => setListInput(e.target.value)} placeholder="一人一行：部門-姓名" />
+                                        <textarea className="absolute inset-4 bg-transparent outline-none resize-none custom-scrollbar text-lg font-mono" value={listInput} onChange={(e) => setListInput(e.target.value)} placeholder="一人一行：部門-姓名" />
                                     ) : (
-                                        <div className="h-full flex flex-col">
-                                            <div ref={sortableRef} className="flex-1 overflow-y-auto space-y-2 pr-2 custom-scrollbar">
-                                                {prizeSettings.map((ps, idx) => (
-                                                    <div key={ps.id} className="bg-slate-800 p-3 rounded-xl border border-white/5 flex items-center gap-2">
-                                                        <span className="drag-handle cursor-grab text-slate-500 px-1 select-none">⠿</span>
-                                                        <input className="bg-transparent font-bold flex-1 outline-none text-orange-400 text-sm lg:text-base" value={ps.name} onChange={(e) => { const n = [...prizeSettings]; n[idx].name = e.target.value; setPrizeSettings(n); }} />
-                                                        <div className="flex items-center">
-                                                            <span className="text-[10px] text-slate-500 mr-1 italic">抽</span>
-                                                            <input type="number" className="w-12 lg:w-20 bg-slate-700 p-1 rounded text-center font-bold text-xs" value={ps.count} onChange={(e) => { const n = [...prizeSettings]; n[idx].count = parseInt(e.target.value)||1; setPrizeSettings(n); }} />
-                                                        </div>
-                                                        <button onClick={() => setPrizeSettings(prizeSettings.filter(p => p.id !== ps.id))} className="text-red-500 font-bold px-2 hover:bg-red-950 rounded transition-colors text-xl">✕</button>
-                                                    </div>
-                                                ))}
-                                            </div>
-                                            <button className="w-full border-2 border-dashed border-white/10 p-3 rounded-xl text-slate-500 text-sm font-bold mt-2 hover:bg-white/5 transition-all" onClick={() => setPrizeSettings([...prizeSettings, { id: Date.now(), name: "新獎項", count: 1 }])}>+ 新增項目</button>
+                                        <div className="h-full flex flex-col overflow-y-auto custom-scrollbar space-y-2">
+                                            {prizeSettings.map((ps, idx) => (
+                                                <div key={ps.id} className="bg-slate-800 p-3 rounded-xl border border-white/5 flex items-center gap-2">
+                                                    <input className="bg-transparent font-bold flex-1 outline-none text-orange-400" value={ps.name} onChange={(e) => { const n = [...prizeSettings]; n[idx].name = e.target.value; setPrizeSettings(n); }} />
+                                                    <input type="number" className="w-16 bg-slate-700 p-1 rounded text-center font-bold" value={ps.count} onChange={(e) => { const n = [...prizeSettings]; n[idx].count = parseInt(e.target.value)||1; setPrizeSettings(n); }} />
+                                                    <button onClick={() => setPrizeSettings(prizeSettings.filter(p => p.id !== ps.id))} className="text-red-500 font-bold px-2">✕</button>
+                                                </div>
+                                            ))}
+                                            <button className="w-full border-2 border-dashed border-white/10 p-3 rounded-xl text-slate-500 font-bold" onClick={() => setPrizeSettings([...prizeSettings, { id: Date.now(), name: "新獎項", count: 1 }])}>+ 新增項目</button>
                                         </div>
                                     )}
                                 </div>
                                 <div className="shrink-0 flex flex-col gap-2">
                                     <div className="flex gap-2">
-                                        <button onClick={downloadCSV} className="flex-1 bg-green-700 py-3 rounded-xl font-black shadow-lg">💾 下載 CSV</button>
-                                        <button onClick={resetSystem} className="flex-1 bg-slate-700 text-orange-400 py-3 rounded-xl font-bold border border-orange-500/20">🔄 重置系統</button>
+                                        <button onClick={downloadCSV} className="flex-1 bg-green-700 py-3 rounded-xl font-black">下載 CSV</button>
+                                        <button onClick={() => db.ref("raffle_state").update({history: [], results: [], participants: listInput.split('\n')})} className="flex-1 bg-slate-700 text-orange-400 py-3 rounded-xl font-bold">同步重置</button>
                                     </div>
-                                    <button className="w-full bg-orange-600 text-white py-4 rounded-xl font-black text-lg shadow-xl active:scale-95" onClick={handleAdminSave}>儲存設定並關閉</button>
+                                    <button className="w-full bg-orange-600 text-white py-4 rounded-xl font-black text-lg shadow-xl" onClick={handleAdminSave}>💾 儲存並同步至雲端</button>
                                 </div>
                             </div>
                         </div>
