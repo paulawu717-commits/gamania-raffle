@@ -47,6 +47,19 @@
 
         if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
         const database = firebase.database();
+        // --- 新增：管理員自動登入邏輯 ---
+const adminEmail = "paulawu@gamania.com";
+const adminPassword = "0515gtwparty";
+
+firebase.auth().signInWithEmailAndPassword(adminEmail, adminPassword)
+    .then(() => {
+        console.log("🔒 安全登入成功，已獲得資料庫存取權限");
+    })
+    .catch((error) => {
+        console.error("❌ 登入失敗：", error.message);
+        alert("資料庫存取被拒絕，請檢查帳號密碼設定。");
+    });
+// -----------------------------
 
         function RaffleApp() {
             const [participants, setParticipants] = useState([]);
