@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>🍊2026 台灣遊戲橘子主管餐會🍊</title>
+    <title>🍊 2026 台灣遊戲橘子主管餐會 </title>
     
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
@@ -30,9 +30,8 @@
     <div id="root"></div>
 
     <script type="text/babel">
-        const { useEffect, useState } = React;
+        const { useEffect, useState, useRef } = React;
 
-        // --- 1. 配置與帳密設定 ---
         const IMAGE_URLS = { WHOLE: "./orange.png", SLICE: "./orange-slice.png" };
         const ADMIN_EMAIL = "paulawu@gamania.com";
         const ADMIN_PWD = "0515gtwparty"; 
@@ -47,15 +46,9 @@
             appId: "1:744074818232:web:668c4f45b1c4a913dc3a4d"
         };
 
-        // --- 2. 初始化 ---
         if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
         const database = firebase.database();
         const auth = firebase.auth();
-
-        // 啟動時自動登入
-        auth.signInWithEmailAndPassword(ADMIN_EMAIL, ADMIN_PWD)
-            .then(() => console.log("🔒 安全登入成功"))
-            .catch(err => alert("登入失敗: " + err.message));
 
         function RaffleApp() {
             const [participants, setParticipants] = useState([]);
@@ -67,15 +60,22 @@
             const [adminOpen, setAdminOpen] = useState(false);
             const [adminTab, setAdminTab] = useState('list');
             const [listInput, setListInput] = useState("");
+            const [loading, setLoading] = useState(true);
 
             useEffect(() => {
-                // 只有登入後才監聽資料庫
+                // 自動登入
+                auth.signInWithEmailAndPassword(ADMIN_EMAIL, ADMIN_PWD)
+                    .catch(err => console.error("Login Check:", err.message));
+
                 const unsubscribe = auth.onAuthStateChanged((user) => {
                     if (user) {
                         const dbRef = database.ref("raffle_state");
                         dbRef.on("value", (snapshot) => {
                             const data = snapshot.val();
-                            if (!data) return;
+                            if (!data) {
+                                setLoading(false);
+                                return;
+                            }
                             setParticipants(data.participants || []);
                             setPrizeSettings(data.prizeSettings || []);
                             setHistory(data.history || []);
@@ -91,21 +91,19 @@
                             } else if (!data.isSpinning) {
                                 setResults(data.winners || []);
                             }
+                            setLoading(false);
                         });
                     }
                 });
                 return () => unsubscribe();
             }, [isSpinning]);
 
-            // 計算圖片寬度 (包含橘瓣縮小邏輯)
             const getImgWidth = () => {
                 const total = prizeSettings.length;
                 if (total === 0) return 300;
-                // 💡 橘瓣縮小：最後一個獎項設定為 180px
                 if (selectedPrizeIndex === total - 1 && total > 1) return 180;
-                
-                const maxWidth = 550; // 第一名橘子大小
-                const minWidth = 220; // 最小橘子大小
+                const maxWidth = 550;
+                const minWidth = 220;
                 if (total <= 1) return maxWidth;
                 const step = (maxWidth - minWidth) / Math.max(1, total - 2);
                 return Math.max(minWidth, maxWidth - (selectedPrizeIndex * step));
@@ -133,11 +131,11 @@
                 setTimeout(() => { database.ref("raffle_state").update({ isSpinning: false }); }, 3000);
             };
 
-            const currentPrize = prizeSettings[selectedPrizeIndex];
+            if (loading) return <div className="h-screen flex items-center justify-center text-orange-500 font-bold animate-pulse">🔒 加密連線中...</div>;
 
             return (
                 <div className="flex flex-col p-3 lg:p-6 min-h-screen">
-                    <button onClick={() => setAdminOpen(true)} className="absolute top-4 left-4 opacity-5 hover:opacity-100 text-2xl z-50">⚙️</button>
+                    <button onClick={() => setAdminOpen(true)} className="absolute top-4 left-4 opacity-5 hover:opacity-100 text-2xl z-50 transition-opacity">⚙️</button>
                     <header className="shrink-0 text-center py-4 mb-4 font-black text-orange-500 uppercase italic tracking-widest drop-shadow-lg text-2xl lg:text-4xl">
                         🍊 2026 台灣遊戲橘子主管餐會
                     </header>
@@ -145,8 +143,8 @@
                         <div className="bg-slate-900 rounded-[3rem] p-6 lg:p-10 flex flex-col border border-slate-800 shadow-2xl relative min-h-[600px] overflow-hidden">
                             <div className="shrink-0 flex justify-between items-center mb-8 border-b border-white/10 pb-6">
                                 <div className="text-xl lg:text-3xl font-black italic text-orange-400">
-                                    {currentPrize?.name || "載入中..."}
-                                    {currentPrize?.isDrawn && <span className="ml-3 text-red-500 text-xs border border-red-500 px-2 py-0.5 rounded italic">DRAWN</span>}
+                                    {prizeSettings[selectedPrizeIndex]?.name || "準備開獎"}
+                                    {prizeSettings[selectedPrizeIndex]?.isDrawn && <span className="ml-3 text-red-500 text-xs border border-red-500 px-2 py-0.5 rounded italic">DRAWN</span>}
                                 </div>
                                 <select className="bg-slate-800 text-white text-sm lg:text-lg px-4 py-2 rounded-2xl border border-slate-700 outline-none" 
                                     value={selectedPrizeIndex} 
@@ -175,54 +173,59 @@
                                 )}
                             </div>
                             <div className="shrink-0 pt-8 flex flex-col items-center">
-                                <button onClick={handleStartDraw} disabled={isSpinning || participants.length === 0 || currentPrize?.isDrawn} 
-                                    className={`w-full max-w-md py-5 lg:py-7 rounded-[2rem] font-black text-2xl lg:text-4xl shadow-[0_10px_0_rgb(154,52,18)] active:shadow-none active:translate-y-[10px] transition-all ${currentPrize?.isDrawn ? 'bg-slate-700 opacity-50' : 'bg-orange-600 text-white'}`}>
-                                    {currentPrize?.isDrawn ? "已抽完" : "立刻開獎"}
+                                <button onClick={handleStartDraw} disabled={isSpinning || participants.length === 0 || prizeSettings[selectedPrizeIndex]?.isDrawn} 
+                                    className={`w-full max-w-md py-5 lg:py-7 rounded-[2rem] font-black text-2xl lg:text-4xl shadow-[0_10px_0_rgb(154,52,18)] active:shadow-none active:translate-y-[10px] transition-all ${prizeSettings[selectedPrizeIndex]?.isDrawn ? 'bg-slate-700 opacity-50' : 'bg-orange-600 text-white hover:bg-orange-500'}`}>
+                                    {prizeSettings[selectedPrizeIndex]?.isDrawn ? "已抽完" : "立刻開獎"}
                                 </button>
-                                <div className="mt-4 text-slate-500 font-bold italic">REMAINING: {participants.length}</div>
+                                <div className="mt-4 text-slate-500 font-bold italic uppercase tracking-widest text-xs">Remaining: {participants.length}</div>
                             </div>
                         </div>
                     </main>
 
-                    {/* 管理面板 */}
                     {adminOpen && (
                         <div className="fixed inset-0 bg-black/95 flex items-center justify-center z-[100] p-4 text-white">
                             <div className="bg-slate-800 p-6 lg:p-10 rounded-[3rem] w-full max-w-4xl h-[85%] flex flex-col border border-slate-700 shadow-2xl overflow-hidden">
                                 <div className="flex justify-between items-center mb-6">
                                     <h2 className="text-orange-400 font-black text-3xl uppercase italic">Control Panel</h2>
-                                    <button onClick={() => setAdminOpen(false)} className="text-2xl text-slate-500">✕</button>
+                                    <button onClick={() => setAdminOpen(false)} className="text-2xl text-slate-500 hover:text-white p-2">✕</button>
                                 </div>
                                 <div className="flex gap-4 mb-6">
-                                    <button onClick={() => setAdminTab('list')} className={`flex-1 py-3 rounded-2xl font-black ${adminTab === 'list' ? 'bg-orange-600' : 'bg-slate-700 opacity-50'}`}>名單編輯</button>
-                                    <button onClick={() => setAdminTab('prizes')} className={`flex-1 py-3 rounded-2xl font-black ${adminTab('prizes') === 'prizes' ? 'bg-orange-600' : 'bg-slate-700 opacity-50'}`}>獎項維護</button>
+                                    <button onClick={() => setAdminTab('list')} className={`flex-1 py-3 rounded-2xl font-black transition-all ${adminTab === 'list' ? 'bg-orange-600' : 'bg-slate-700 opacity-50'}`}>名單編輯</button>
+                                    <button onClick={() => setAdminTab('prizes')} className={`flex-1 py-3 rounded-2xl font-black transition-all ${adminTab === 'prizes' ? 'bg-orange-600' : 'bg-slate-700 opacity-50'}`}>獎項維護</button>
                                 </div>
                                 <div className="flex-1 bg-slate-900 rounded-3xl p-6 overflow-hidden relative mb-6">
-                                    {adminTab === 'list' ? <textarea className="absolute inset-6 bg-transparent outline-none resize-none custom-scrollbar text-xl font-mono text-white" value={listInput} onChange={(e) => setListInput(e.target.value)} placeholder="部門-姓名" /> :
+                                    {adminTab === 'list' ? (
+                                        <textarea className="absolute inset-6 bg-transparent outline-none resize-none custom-scrollbar text-xl font-mono text-white" value={listInput} onChange={(e) => setListInput(e.target.value)} placeholder="部門-姓名 (每行一位)" />
+                                    ) : (
                                         <div className="h-full overflow-y-auto space-y-3 custom-scrollbar">
-                                            {prizeSettings.map((ps, idx) => (
-                                                <div key={ps.id} className="bg-slate-800 p-4 rounded-2xl flex items-center gap-4">
+                                            {prizeSettings && prizeSettings.map((ps, idx) => (
+                                                <div key={ps.id || idx} className="bg-slate-800 p-4 rounded-2xl flex items-center gap-4 border border-white/5">
                                                     <input className="bg-transparent font-bold flex-1 outline-none text-orange-400" value={ps.name} onChange={(e) => { const n = [...prizeSettings]; n[idx].name = e.target.value; setPrizeSettings(n); }} />
-                                                    <input type="number" className="w-16 bg-slate-700 py-2 rounded-xl text-center font-black" value={ps.count} onChange={(e) => { const n = [...prizeSettings]; n[idx].count = parseInt(e.target.value)||1; setPrizeSettings(n); }} />
-                                                    <button onClick={() => setPrizeSettings(prizeSettings.filter(p => p.id !== ps.id))} className="text-red-500 text-2xl">✕</button>
+                                                    <div className="flex items-center gap-2">
+                                                        <span className="text-xs text-slate-500">抽:</span>
+                                                        <input type="number" className="w-16 bg-slate-700 py-2 rounded-xl text-center font-black" value={ps.count} onChange={(e) => { const n = [...prizeSettings]; n[idx].count = parseInt(e.target.value) || 1; setPrizeSettings(n); }} />
+                                                    </div>
+                                                    <button onClick={() => setPrizeSettings(prizeSettings.filter((_, i) => i !== idx))} className="text-red-500 p-2">✕</button>
                                                 </div>
                                             ))}
-                                            <button className="w-full border-2 border-dashed border-white/10 p-4 rounded-2xl text-slate-500 font-bold" onClick={() => setPrizeSettings([...prizeSettings, { id: Date.now(), name: "新獎項", count: 1, isDrawn: false }])}>+ 新增項目</button>
+                                            <button className="w-full border-2 border-dashed border-white/10 p-4 rounded-2xl text-slate-500 font-bold hover:bg-white/5" onClick={() => setPrizeSettings([...prizeSettings, { id: Date.now(), name: "新獎項", count: 1, isDrawn: false }])}>+ 新增</button>
                                         </div>
-                                    }
+                                    )}
                                 </div>
                                 <div className="shrink-0 flex flex-col gap-3">
                                     <div className="flex gap-4">
                                         <button onClick={() => {
+                                            if (!history.length) return alert("尚無紀錄");
                                             const header = "\ufeff時間,獎項,中獎人\n";
                                             const content = history.map(h => `${h.time},${h.prize},${h.name}`).join("\n");
                                             const blob = new Blob([header + content], { type: "text/csv;charset=utf-8;" });
                                             const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "中獎名單.csv"; link.click();
-                                        }} className="flex-1 bg-green-700 py-4 rounded-2xl font-black transition-colors">💾 下載 CSV</button>
-                                        <button onClick={() => { if(confirm("確定系統重置？")) { database.ref("raffle_state").update({ winners: [], history: [], isSpinning: false, selectedPrizeIndex: 0, prizeSettings: prizeSettings.map(p => ({ ...p, isDrawn: false })) }); } }} className="flex-1 bg-slate-700 text-orange-400 py-4 rounded-2xl font-black border border-orange-500/20">🔄 系統重置</button>
+                                        }} className="flex-1 bg-emerald-700 hover:bg-emerald-600 py-4 rounded-2xl font-black">💾 下載 CSV</button>
+                                        <button onClick={() => { if(confirm("重置將清除所有紀錄，確定嗎？")) { database.ref("raffle_state").update({ winners: [], history: [], isSpinning: false, selectedPrizeIndex: 0, prizeSettings: prizeSettings.map(p => ({ ...p, isDrawn: false })) }); } }} className="flex-1 bg-slate-700 text-orange-400 py-4 rounded-2xl font-black border border-orange-500/20">🔄 系統重置</button>
                                     </div>
-                                    <button className="w-full bg-orange-600 text-white py-5 rounded-[2rem] font-black text-2xl shadow-xl active:scale-95" onClick={() => {
+                                    <button className="w-full bg-orange-600 hover:bg-orange-500 text-white py-5 rounded-[2rem] font-black text-2xl shadow-xl active:scale-95" onClick={() => {
                                         const pool = listInput.split('\n').map(n => n.trim()).filter(n => n !== "");
-                                        database.ref("raffle_state").update({ participants: pool, prizeSettings: prizeSettings, winners: [], isSpinning: false }).then(() => { setAdminOpen(false); alert("同步完成！"); });
+                                        database.ref("raffle_state").update({ participants: pool, prizeSettings: prizeSettings, winners: [], isSpinning: false }).then(() => { setAdminOpen(false); alert("同步成功！"); });
                                     }}>儲存名單與設定</button>
                                 </div>
                             </div>
@@ -231,7 +234,9 @@
                 </div>
             );
         }
-        ReactDOM.createRoot(document.getElementById('root')).render(<RaffleApp />);
+        
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<RaffleApp />);
     </script>
 </body>
 </html>
